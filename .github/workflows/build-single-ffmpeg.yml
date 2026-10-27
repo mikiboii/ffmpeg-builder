@@ -3,6 +3,8 @@ name: Build Single FFmpeg Binary
 on:
   workflow_dispatch:
   push:
+    branches:
+      - main
     tags:
       - "v*"
 
@@ -187,7 +189,7 @@ jobs:
 
   release:
     name: Create Release
-    if: needs.build.result == 'success'   
+    if: needs.build.result == 'success'
     needs: build
     runs-on: ubuntu-latest
     permissions:
@@ -207,7 +209,17 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: latest
+          name: "Latest FFmpeg build"
+          body: |
+            Automated build from commit ${{ github.sha }} on `${{ github.ref_name }}`.
+
+            Single-file binaries (no archives):
+            - `ffmpeg-macos-arm64` (macOS Apple Silicon)
+            - `ffmpeg-windows-x86_64.exe` (Windows 64-bit)
           files: |
             ./final-assets/ffmpeg-macos-arm64
             ./final-assets/ffmpeg-windows-x86_64.exe
           generate_release_notes: true
+          draft: false
+          prerelease: false
