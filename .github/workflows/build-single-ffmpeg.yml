@@ -34,7 +34,6 @@ jobs:
         shell: bash
         run: ./scripts/bootstrap-macos.sh
 
-      # Patch libsvtav1 (use Python, not sed, for BSD compatibility)
       - name: Patch libsvtav1 for SVT-AV1 4.x (macOS)
         if: runner.os == 'macOS'
         shell: bash
@@ -77,7 +76,6 @@ jobs:
         shell: bash
         run: ./scripts/package.sh
 
-      # Extract ffmpeg from the zip created by package.sh
       - name: Extract ffmpeg (macOS)
         if: runner.os == 'macOS'
         shell: bash
@@ -106,7 +104,7 @@ jobs:
           msystem: MINGW64
           update: true
           install: >-
-            base-devel git nasm yasm cmake ninja zip
+            base-devel git nasm yasm cmake ninja zip unzip
             mingw-w64-x86_64-toolchain mingw-w64-x86_64-pkgconf
             mingw-w64-x86_64-x264 mingw-w64-x86_64-x265
             mingw-w64-x86_64-aom mingw-w64-x86_64-opus mingw-w64-x86_64-libvpx
@@ -148,13 +146,11 @@ jobs:
         shell: msys2 {0}
         run: ./scripts/build-ffmpeg-windows.sh
 
-      # CRITICAL: run the official packaging script to produce the zip in dist/
       - name: Package (Windows)
         if: runner.os == 'Windows'
         shell: msys2 {0}
         run: ./scripts/package-windows.sh
 
-      # Extract ffmpeg.exe from the zip instead of guessing the build output path
       - name: Extract ffmpeg.exe (Windows)
         if: runner.os == 'Windows'
         shell: msys2 {0}
