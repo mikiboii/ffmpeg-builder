@@ -34,17 +34,11 @@ jobs:
         shell: bash
         run: ./scripts/bootstrap-macos.sh
 
-      # Key step: Patch FFmpeg source code before building to adapt to SVT-AV1 4.x
+      # Patch libsvtav1 (use Python, not sed, for BSD compatibility)
       - name: Patch libsvtav1 for SVT-AV1 4.x (macOS)
         if: runner.os == 'macOS'
         shell: bash
         run: |
-          # ffmpeg-builder will download the source code to .build-cache/src/ during the build script
-          # Here we modify after the build script downloads the source code but before compilation
-          # Since the build script doesn't expose a hook, we first let it download the source code (build will fail), then patch
-          # A more elegant approach is to manually download the source code, but this is the simplest modification
-          # Actually, ffmpeg-builder's build-ffmpeg.sh downloads and compiles internally
-          # We use a workaround: first download the source code to the expected location, then patch
           mkdir -p .build-cache/src
           cd .build-cache/src
           if [ ! -d "ffmpeg-${FFMPEG_VERSION}" ]; then
@@ -52,23 +46,52 @@ jobs:
             tar xf ffmpeg.tar.xz
           fi
           cd ffmpeg-${FFMPEG_VERSION}
-          # Apply the official fix: wrap with version check
-          sed -i 's/param->enable_adaptive_quantization = 0;/#if SVT_AV1_CHECK_VERSION(4, 0, 0)\n        param->aq_mode = 0;\n#else\n        param->enable_adaptive_quantization = 0;\n#endif/' libavcodec/libsvtav1.c
-          echo "Patched libsvtav1.c:"
-          grep -A 3 "aq_mode" libavcodec/libsvtav1.c
+          python3 - <<'PY'
+          import sys
+          path = "libavcodec/libsvtav1.c"
+          src = open(path, "r", encoding="utf-8").read()
+          old = "param->enable_adaptive_quantization = 0;"
+          new = (
+              "#if SVT_AV1_CHECK_VERSION(4, 0, 0)\n"
+              "        param->aq_mode = 0;\n"
+              "#else\n"
+              "        param->enable_adaptive_quantization = 0;\n"
+              "#endif"
+          )
+          if new in src:
+              print("Already patched")
+          elif old not in src:
+              sys.exit("ERROR: target line not found")
+          else:
+              open(path, "w", encoding="utf-8").write(src.replace(old, new, 1))
+              print("Patched libsvtav1.c")
+          PY
 
       - name: Build FFmpeg (macOS)
         if: runner.os == 'macOS'
         shell: bash
         run: ./scripts/build-ffmpeg.sh
 
-      - name: Locate and copy binary (macOS)
+      - name: Package (macOS)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: ./scripts/package.sh
+
+      # Extract ffmpeg from the zip created by package.sh
+      - name: Extract ffmpeg (macOS)
         if: runner.os == 'macOS'
         shell: bash
         run: |
-          FFMPEG_BIN=$(find out -name "ffmpeg" -type f | head -n 1)
+          ZIP=$(find dist -name "*.zip" | head -n 1)
+          if [ -z "$ZIP" ]; then
+            echo "ERROR: no zip found in dist/"
+            ls -la dist/ || true
+            exit 1
+          fi
+          unzip -o "$ZIP" -d extracted
+          FFMPEG_BIN=$(find extracted -name "ffmpeg" -type f | head -n 1)
           if [ -z "$FFMPEG_BIN" ]; then
-            echo "ERROR: ffmpeg binary not found"
+            echo "ERROR: ffmpeg not found in zip"
             exit 1
           fi
           cp "$FFMPEG_BIN" ./ffmpeg-macos-arm64
@@ -99,25 +122,57 @@ jobs:
             tar xf ffmpeg.tar.xz
           fi
           cd ffmpeg-${FFMPEG_VERSION}
-          sed -i 's/param->enable_adaptive_quantization = 0;/#if SVT_AV1_CHECK_VERSION(4, 0, 0)\n        param->aq_mode = 0;\n#else\n        param->enable_adaptive_quantization = 0;\n#endif/' libavcodec/libsvtav1.c
-          echo "Patched libsvtav1.c:"
-          grep -A 3 "aq_mode" libavcodec/libsvtav1.c
+          python - <<'PY'
+          import sys
+          path = "libavcodec/libsvtav1.c"
+          src = open(path, "r", encoding="utf-8").read()
+          old = "param->enable_adaptive_quantization = 0;"
+          new = (
+              "#if SVT_AV1_CHECK_VERSION(4, 0, 0)\n"
+              "        param->aq_mode = 0;\n"
+              "#else\n"
+              "        param->enable_adaptive_quantization = 0;\n"
+              "#endif"
+          )
+          if new in src:
+              print("Already patched")
+          elif old not in src:
+              sys.exit("ERROR: target line not found")
+          else:
+              open(path, "w", encoding="utf-8").write(src.replace(old, new, 1))
+              print("Patched libsvtav1.c")
+          PY
 
       - name: Build FFmpeg (Windows)
         if: runner.os == 'Windows'
         shell: msys2 {0}
         run: ./scripts/build-ffmpeg-windows.sh
 
-      - name: Locate and copy binary (Windows)
+      # CRITICAL: run the official packaging script to produce the zip in dist/
+      - name: Package (Windows)
+        if: runner.os == 'Windows'
+        shell: msys2 {0}
+        run: ./scripts/package-windows.sh
+
+      # Extract ffmpeg.exe from the zip instead of guessing the build output path
+      - name: Extract ffmpeg.exe (Windows)
         if: runner.os == 'Windows'
         shell: msys2 {0}
         run: |
-          FFMPEG_BIN=$(find out -name "ffmpeg.exe" -type f | head -n 1)
+          ZIP=$(find dist -name "*.zip" | head -n 1)
+          if [ -z "$ZIP" ]; then
+            echo "ERROR: no zip found in dist/"
+            ls -la dist/ || true
+            exit 1
+          fi
+          unzip -o "$ZIP" -d extracted
+          FFMPEG_BIN=$(find extracted -name "ffmpeg.exe" -type f | head -n 1)
           if [ -z "$FFMPEG_BIN" ]; then
-            echo "ERROR: ffmpeg.exe not found"
+            echo "ERROR: ffmpeg.exe not found in zip"
             exit 1
           fi
           cp "$FFMPEG_BIN" ./ffmpeg-windows-x86_64.exe
+          ./ffmpeg-windows-x86_64.exe -version
 
       # ---------- Upload Artifacts ----------
       - name: Upload artifact (macOS)
